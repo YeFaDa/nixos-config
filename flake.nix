@@ -8,8 +8,13 @@
       url = "github:noctalia-dev/noctalia";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # noctalia 官方登录界面（greetd greeter）
+    noctalia-greeter = {
+      url = "github:noctalia-dev/noctalia-greeter";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     # CachyOS 内核（bore/lto/zen4 等变体），pinned overlay 命中 attic 二进制缓存
-    nix-cachyos-kernel.url = "github:xddxdd/nix-cachyos-kernel";
+    nix-cachyos-kernel.url = "github:xddxdd/nix-cachyos-kernel/release";
    /* home-manager = {
       url = "git+https://gitcode.com/GitHub_Trending/ho/home-manager.git";
       # The `follows` keyword in inputs is used for inheritance.
@@ -22,6 +27,11 @@
     vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
     # OMP（Oh My Pi）harness，agents/omp.nix 使用
     omp-nix.url = "github:yuxqiu/omp-nix";
+    # DeepSeek Harness Nix，提供 dsh flake package
+    deepseek-harness = {
+      url = "github:moraxyc/deepseek-harness.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = { self, nixpkgs, vscode-extensions, ... }@inputs: {
@@ -37,6 +47,7 @@
         ./vscode.nix
         ./games/game-prepare.nix
         ./kvm+qemu+virt/default.nix
+        ./agents/deepseek-harness.nix
         ./agents/omp.nix
 	/*home-manager.nixosModules.home-manager
           {

@@ -16,10 +16,6 @@
       };
       ww-manager = final.python3.pkgs.toPythonApplication final.python3.pkgs.ww-manager;
     })
-    # 本地包 deepseek-harness（DeepSeek 开源 agent harness，dsh CLI），定义在 pkgs/deepseek-harness/package.nix
-    (final: prev: {
-      deepseek-harness = final.callPackage ./pkgs/deepseek-harness/package.nix { };
-    })
   ];
   boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-bore-lto-zen4;
   # 让 ACPI 固件认为系统是 Windows 11（ACPI _OSI "Windows 2020"）
@@ -78,23 +74,8 @@ hardware.graphics = {
 	enable32Bit = true;
 };
 hardware.nvidia = {
-  # nvidia-open 610.57.04 与 cachyos 内核的兼容补丁（7.1.6 和 7.1.8 都需要，头文件同样缺 const 修复）：
-  # 1. gpio_device_get_chip：cachyos 头文件参数为非 const，调用处强转
-  # 2. -Werror=format-security：panic() 和 dmem_cgroup_register_region() 传变量当格式串
-  package = let
-    nvidia = config.boot.kernelPackages.nvidiaPackages.latest;
-  in nvidia // {
-    open = nvidia.open.overrideAttrs (old: {
-      postPatch = (if old ? postPatch && old.postPatch != null then old.postPatch else "") + ''
-        substituteInPlace kernel-open/common/inc/nv-linux.h \
-          --replace 'gpio_device_get_chip(gdev)' 'gpio_device_get_chip((struct gpio_device *)gdev)'
-        substituteInPlace kernel-open/nvidia/os-interface.c \
-          --replace 'panic(bugCodeStr);' 'panic("%s", bugCodeStr);'
-        substituteInPlace kernel-open/nvidia/os-interface.c \
-          --replace 'dmem_cgroup_register_region(size, name)' 'dmem_cgroup_register_region(size, "%s", name)'
-      '';
-    });
-  };
+  # NVIDIA 开源模块直接使用与当前 CachyOS 内核匹配的驱动包。
+  package = config.boot.kernelPackages.nvidiaPackages.latest;
 	modesetting.enable = true;
 	open = true;
 	nvidiaSettings = true;
@@ -123,27 +104,18 @@ users.users.yz = {
 	extraGroups = [ "video" "wheel" "networkmanager" "render" "storage" "network" "libvirtd" "kvm" ];
   #shell = pkgs.fish;
 };
-#greeted设置
-/*services.greetd = {
-    enable = true;
-    settings = {
-      default_session = {
-        # 选择一个合适的 greeter（登录界面）
-        command = "${pkgs.tuigreet}/bin/tuigreet --time --remember-session --remember";
-        user = "greeter";
-      };
-    };
-  };*/
+#greetd 登录界面配置已移至 noctalia.nix（noctalia-greeter）
 
 ####软件安装
   # programs.firefox.enable = true;
 programs.firefox.enable = true;
-programs.firefox.languagePacks = ["zh-CN" ];
+programs.firefox.languagePacks = [ "zh-CN" ];
 programs.niri.enable = true;
 programs.fish.enable = true;
 
 hardware.brillo.enable = true;
 security.polkit.enable = true;
+security.rtkit.enable = true;
 security.soteria.enable = true;
 programs.localsend.enable = true;
 services.udisks2.enable = true;
@@ -167,14 +139,15 @@ environment.systemPackages = with pkgs; [
   zed-editor
   nixd
   nil
+  nixfmt
   nh # nix-helper: better nixos-rebuild CLI with full build logs
   nautilus
   xdg-user-dirs
   bilibili
   fastfetch
   btop
+  nodejs_24
   ww-manager
-  deepseek-harness
   starship
   #tuigreet
   bluez
@@ -205,9 +178,20 @@ fontconfig.defaultFonts = {
   };
 
 };
+#ssh
+services.openssh = {
+  enable = true;
+  openFirewall = true;
+  settings = {
+    PermitRootLogin = "no";
+    PasswordAuthentication = true;
+  };
+};
+
 nix.settings.experimental-features = [ "nix-command" "flakes" ];
 nix.settings.substituters = [ "https://mirrors.ustc.edu.cn/nix-channels/store" "https://mirrors.tuna.tsinghua.edu.cn/nix-channels/store" ];
-# CachyOS 内核二进制缓存（xddxdd/nix-cachyos-kernel，master 构建在此缓存）
-nix.settings.extra-substituters = [ "https://attic.xuyh0120.win/lantian" ];
-nix.settings.extra-trusted-public-keys = [ "lantian:EeAUQ+W+6r7EtwnmYjeVwx5kOGEBpjlBfPlzGlTNvHc=" ];
+# CachyOS 内核二进制缓存（xddxdd/nix-cachyos-kernel/release 构建在此缓存）
+# noctalia 官方 cachix 缓存（noctalia-greeter 等直接下二进制，不用源码编译）
+nix.settings.extra-substituters = [ "https://attic.xuyh0120.win/lantian" "https://noctalia.cachix.org" ];
+nix.settings.extra-trusted-public-keys = [ "lantian:EeAUQ+W+6r7EtwnmYjeVwx5kOGEBpjlBfPlzGlTNvHc=" "noctalia.cachix.org-1:pCOR47nnMEo5thcxNDtzWpOxNFQsBRglJzxWPp3dkU4=" ];
 }
