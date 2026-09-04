@@ -23,7 +23,7 @@
   # zenergy：AMD Zen 功耗传感器内核模块（k10temp 不暴露 power1_average）。
   # 装好后 MangoHud 就能读到 CPU 功耗。
   boot.extraModulePackages = [ config.boot.kernelPackages.zenergy ];
-  boot.kernelModules = [ "zenergy" ];
+  boot.kernelModules = [ "zenergy" "ntsync" ];
   # scx_lavd in Gaming mode（= --performance，与 CachyOS 的 gaming_mode 相同）
   services.scx = {
     enable = true;

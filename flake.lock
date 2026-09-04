@@ -222,11 +222,11 @@
         "nixpkgs": "nixpkgs_3"
       },
       "locked": {
-        "lastModified": 1787274056,
-        "narHash": "sha256-TzMiAFbT/FKoni+cxlGLC3rwwJZjk3xJMgU3URaIiZ8=",
+        "lastModified": 1787813698,
+        "narHash": "sha256-5V9Cd1r0OWamyNDikj68kWDMl7KySpfLxOf2vlrXMAs=",
         "owner": "yuxqiu",
         "repo": "omp-nix",
-        "rev": "8534bd5382fdf061f77bfe27ee07f5e7d4566507",
+        "rev": "feff84b6d7b39d784cf4e7e6a3d84a78a26a5495",
         "type": "github"
       },
       "original": {
