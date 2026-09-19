@@ -16,6 +16,26 @@
       };
       ww-manager = final.python3.pkgs.toPythonApplication final.python3.pkgs.ww-manager;
     })
+    # niri-glass：不使用 niri-glass flake 自带的包（它锁死 niri@49fc611 + 自己的 nixpkgs），
+    # 改为把它的 8 个补丁文件叠加到本机 nixpkgs 的 niri（v26.04）源码上，
+    # 用本机 rustc 和依赖集构建。补丁只覆盖源码、不动 Cargo.lock，vendor hash 不变。
+    (final: prev: {
+      niri-glass = prev.niri.overrideAttrs (old: {
+        pname = "niri-glass";
+        postPatch = (old.postPatch or "") + ''
+          echo "==> Applying Niri-glass liquid-glass overlay"
+          chmod -R u+w src/render_helpers niri-config/src
+          cp --no-preserve=mode ${inputs.niri-glass}/src/render_helpers/liquid_glass.rs src/render_helpers/liquid_glass.rs
+          cp --no-preserve=mode ${inputs.niri-glass}/src/render_helpers/background_effect.rs src/render_helpers/background_effect.rs
+          cp --no-preserve=mode ${inputs.niri-glass}/src/render_helpers/framebuffer_effect.rs src/render_helpers/framebuffer_effect.rs
+          cp --no-preserve=mode ${inputs.niri-glass}/src/render_helpers/xray.rs src/render_helpers/xray.rs
+          cp --no-preserve=mode ${inputs.niri-glass}/src/render_helpers/mod.rs src/render_helpers/mod.rs
+          cp --no-preserve=mode ${inputs.niri-glass}/src/render_helpers/shaders/clipped_surface.frag src/render_helpers/shaders/clipped_surface.frag
+          cp --no-preserve=mode ${inputs.niri-glass}/src/render_helpers/shaders/mod.rs src/render_helpers/shaders/mod.rs
+          cp --no-preserve=mode ${inputs.niri-glass}/niri-config/src/appearance.rs niri-config/src/appearance.rs
+        '';
+      });
+    })
   ];
   boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-bore-lto-zen4;
   # 让 ACPI 固件认为系统是 Windows 11（ACPI _OSI "Windows 2020"）
@@ -86,7 +106,7 @@ hardware.nvidia = {
 
 
 #门户设置
-xdg.portal = {
+/*xdg.portal = {
   enable = true;
   # 强制让 niri 优先调用 gnome 后端处理核心请求
   config.common.default = [ "gnome" "gtk" ];
@@ -95,7 +115,8 @@ xdg.portal = {
     pkgs.xdg-desktop-portal-gnome
     pkgs.xdg-desktop-portal-gtk
   ];
-};
+  };*/
+
 #启用非自由软件
 hardware.enableRedistributableFirmware = true;
 nixpkgs.config.allowUnfree = true;
@@ -110,7 +131,13 @@ users.users.yz = {
   # programs.firefox.enable = true;
 programs.firefox.enable = true;
 programs.firefox.languagePacks = [ "zh-CN" ];
+programs.google-chrome.enable = true;
+
+#niri-glass（补丁叠在 nixpkgs 的 niri 上，overlay 定义见本文件顶部）
 programs.niri.enable = true;
+programs.niri.package = pkgs.niri-glass;
+
+
 programs.fish.enable = true;
 
 hardware.brillo.enable = true;
@@ -125,20 +152,23 @@ services.dbus.enable = true;
 
 
 
+
 environment.systemPackages = with pkgs; [
   kitty
+  ghostty
+  ghostty.terminfo
   qq
   wechat
   git
-  lutris
+  lutris-free
   protonplus
   mangohud
   mangojuice
   xwayland-satellite
-  google-chrome
+  #google-chrome
   zed-editor
   nixd
-  nil
+  #nil
   nixfmt
   nh # nix-helper: better nixos-rebuild CLI with full build logs
   nautilus
@@ -155,6 +185,7 @@ environment.systemPackages = with pkgs; [
   adw-gtk3
   nwg-look
   qemu
+  file-roller
 ];
 #字体设置，不用改了
 fonts = {
@@ -189,9 +220,9 @@ services.openssh = {
 };
 
 nix.settings.experimental-features = [ "nix-command" "flakes" ];
-nix.settings.substituters = [ "https://mirrors.ustc.edu.cn/nix-channels/store" "https://mirrors.tuna.tsinghua.edu.cn/nix-channels/store" ];
+nix.settings.substituters = [ "https://mirrors.ustc.edu.cn/nix-channels/store" "https://mirrors.tuna.tsinghua.edu.cn/nix-channels/store" "https://cache.nixos.org" ];
 # CachyOS 内核二进制缓存（xddxdd/nix-cachyos-kernel/release 构建在此缓存）
 # noctalia 官方 cachix 缓存（noctalia-greeter 等直接下二进制，不用源码编译）
-nix.settings.extra-substituters = [ "https://attic.xuyh0120.win/lantian" "https://noctalia.cachix.org" ];
-nix.settings.extra-trusted-public-keys = [ "lantian:EeAUQ+W+6r7EtwnmYjeVwx5kOGEBpjlBfPlzGlTNvHc=" "noctalia.cachix.org-1:pCOR47nnMEo5thcxNDtzWpOxNFQsBRglJzxWPp3dkU4=" ];
+nix.settings.extra-substituters = [ "https://noctalia.cachix.org" "https://attic.xuyh0120.win/lantian?priority=1000" ];
+nix.settings.extra-trusted-public-keys = [ "noctalia.cachix.org-1:pCOR47nnMEo5thcxNDtzWpOxNFQsBRglJzxWPp3dkU4=" "lantian:EeAUQ+W+6r7EtwnmYjeVwx5kOGEBpjlBfPlzGlTNvHc=" ];
 }
