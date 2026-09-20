@@ -16,6 +16,12 @@
       };
       ww-manager = final.python3.pkgs.toPythonApplication final.python3.pkgs.ww-manager;
     })
+    # 本地包 wechat-bin：把微信官方 Linux .deb 重打包（4.1.13.23，直接拉 dldir1，
+    # 不像 nixpkgs 的 wechat 那样固定在 web.archive 的 4.1.1.x 上）。
+    # 依赖表照 AUR wechat-bin；libffmpeg.so 同名遮蔽和 XKB_CONFIG_ROOT 两个坑见 pkgs/wechat-bin/default.nix。
+    (final: prev: {
+      wechat-bin = final.callPackage ./pkgs/wechat-bin { };
+    })
     # niri-glass：不使用 niri-glass flake 自带的包（它锁死 niri@49fc611 + 自己的 nixpkgs），
     # 改为把它的 8 个补丁文件叠加到本机 nixpkgs 的 niri（v26.04）源码上，
     # 用本机 rustc 和依赖集构建。补丁只覆盖源码、不动 Cargo.lock，vendor hash 不变。
@@ -56,8 +62,12 @@
   };
 #iwd作为后端
   networking.wireless.enable = false;
-  networking.firewall.enable = false;
   networking.networkmanager.wifi.backend = "iwd";
+  networking.firewall = {
+    enable = true;
+    # TUN 网卡名由 FlClash 自己定的，就叫 FlClash（区分大小写）
+    trustedInterfaces = [ "FlClash" ];
+  };
   #host设置#
   networking.extraHosts = ''
   20.205.243.166 github.com
@@ -158,7 +168,7 @@ environment.systemPackages = with pkgs; [
   ghostty
   ghostty.terminfo
   qq
-  wechat
+  wechat-bin
   git
   lutris-free
   protonplus

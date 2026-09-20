@@ -35,11 +35,7 @@
     vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
     # OMP（Oh My Pi）harness，agents/omp.nix 使用
     omp-nix.url = "github:yuxqiu/omp-nix";
-    # DeepSeek Harness Nix，提供 dsh flake package
-    deepseek-harness = {
-      url = "github:moraxyc/deepseek-harness.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    
     #flclash
     flclash-nix = {
       url = "github:YeFaDa/flclash-nix";
@@ -72,7 +68,7 @@
         ./vscode.nix
         ./games/game-prepare.nix
         ./kvm+qemu+virt/default.nix
-        ./agents/deepseek-harness.nix
+        #./agents/deepseek-harness.nix
         ./agents/omp.nix
         ./proxy/flclash.nix
         ./pixi.nix
