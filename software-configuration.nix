@@ -44,8 +44,34 @@
     })
   ];
   boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-bore-lto-zen4;
+  # 休眠（hibernate）恢复：swapfile 在根分区 @swap 子卷里，这里写"分区"而不是文件路径。
+  # 还必须在 boot.kernelParams 里配 resume_offset（swapfile 才需要），见下方。
+  boot.resumeDevice = "/dev/disk/by-uuid/636e2f55-6c8e-48b4-8fda-05095668387d";
   # 让 ACPI 固件认为系统是 Windows 11（ACPI _OSI "Windows 2020"）
-  boot.kernelParams = [ ''"acpi_osi=Windows 2020"'' ];
+  # pcie_aspm=off / nvme_core.default_ps_max_latency_us=0：
+  # 本机固件只暴露 s2idle，PCIe ASPM 和 NVMe APST 会在 s2idle 进出时把链路拖死，
+  # 独显直连（内屏挂 dGPU）下的表现就是按电源键没有任何反应。
+  # nvidia.NVreg_EnableS0ixPowerManagement=1：s2idle 下必须让 NVIDIA 走 S0ix 电源管理，
+  # 否则挂起进得去出不来。不能写成 hardware.nvidia.powerManagement.finegrained，
+  # 那个选项带断言"需要 PRIME offload"，本机独显直连会 eval 失败。
+  # 验证：cat /proc/driver/nvidia/gpus/*/power → S0ix Power Management: Status: Enabled
+  # resume_offset：swapfile 恢复用，值取自
+  #   sudo btrfs inspect-internal map-swapfile -r /swap/swapfile
+  # 前提是 boot.resumeDevice 指向该 swapfile 所在分区（见上方）。
+  # 重建 swapfile 后这个偏移会变，需重新取。
+  # 回退：删掉后四行再 nixos-rebuild switch 即可。
+  boot.kernelParams = [
+    ''"acpi_osi=Windows 2020"''
+    "pcie_aspm=off"
+    "nvme_core.default_ps_max_latency_us=0"
+    "nvidia.NVreg_EnableS0ixPowerManagement=1"
+    "resume_offset=533760"
+  ];
+  # 挂起转休眠（suspend-then-hibernate）：先 s2idle 快睡，HibernateDelaySec 到点自动落盘
+  # 休眠，合盖放一整天也不掉电。配套把合盖行为也改成 suspend-then-hibernate。
+  # 注：旧写法 systemd.sleep.extraConfig 在本版 nixpkgs 已改名为 settings.Sleep。
+  systemd.sleep.settings.Sleep.HibernateDelaySec = "30min";
+  services.logind.settings.Login.HandleLidSwitch = "suspend-then-hibernate";
   # zenergy：AMD Zen 功耗传感器内核模块（k10temp 不暴露 power1_average）。
   # 装好后 MangoHud 就能读到 CPU 功耗。
   boot.extraModulePackages = [ config.boot.kernelPackages.zenergy ];
@@ -66,7 +92,7 @@
   networking.firewall = {
     enable = true;
     # TUN 网卡名由 FlClash 自己定的，就叫 FlClash（区分大小写）
-    trustedInterfaces = [ "FlClash" ];
+    trustedInterfaces = [ "FlClash" "ASGAME" ];
   };
   #host设置#
   networking.extraHosts = ''
@@ -105,11 +131,20 @@ hardware.graphics = {
 };
 hardware.nvidia = {
   # NVIDIA 开源模块直接使用与当前 CachyOS 内核匹配的驱动包。
-  package = config.boot.kernelPackages.nvidiaPackages.latest;
+  branch = "bleeding_edge";
 	modesetting.enable = true;
 	open = true;
 	nvidiaSettings = true;
 	powerManagement.enable = true;
+	# 595+ 起在 open 模块下默认为 true，后果是 nvidia-suspend / nvidia-resume 两个 unit
+	# 整个不再生成（nvidia.nix 里的条件是 powerManagement.enable && !kernelSuspendNotifier）。
+	# 本机固件只有 s2idle，走内核 notifier 会进得去回不来，所以退回 systemd 服务路径。
+	powerManagement.kernelSuspendNotifier = false;
+	# 关键项 NVreg_EnableS0ixPowerManagement=1 见文件上方 boot.kernelParams：
+	# 本机固件只暴露 s2idle，NVIDIA 要求 s2idle 下必须开 S0ix 电源管理，否则唤不醒。
+	# 不能写成 powerManagement.finegrained：该选项带断言
+	# "Fine-grained power management requires offload to be enabled"，
+	# 本机独显直连、没有 PRIME offload，会直接 eval 失败。
 	# 启用 nvidia-powerd：Dynamic Boost 让独显能用到满 TGP（当前被锁 50W → 应到 115W）
 	dynamicBoost.enable = true;
 };
