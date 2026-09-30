@@ -21,5 +21,6 @@
   #   user = "yz";
   # };
 
-  programs.noctalia-greeter.enable = true;
+  services.displayManager.noctalia-greeter.enable = true;
+  services.displayManager.noctalia-greeter.settings.keyboard.numlock = true;
 }

@@ -8,6 +8,7 @@
   imports =
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
+      ./acpi-fix.nix
     ];
 
   # Use the systemd-boot EFI boot loader.
@@ -70,8 +71,17 @@
   #   pulse.enable = true;
   # };
 
-  # Enable touchpad support (enabled default in most desktopManager).
-  # services.libinput.enable = true;
+  # Enable touchpad support.
+  services.libinput.enable = true;
+
+  # The internal Uniwill touchpad in this Honor MagicBook (I2C 093a:0255)
+  # exposes only a mouse-style report, so the stock input_id rule marks it as
+  # a mouse. Mark it as a touchpad so libinput can honor niri's dwt setting.
+  services.udev.extraRules = lib.mkAfter ''
+    ACTION=="add|change", SUBSYSTEM=="input", KERNEL=="event*", \
+      ATTRS{phys}=="i2c-UNIW0001:00", ATTRS{id/vendor}=="093a", ATTRS{id/product}=="0255", \
+      ENV{ID_INPUT_TOUCHPAD}="1", ENV{ID_INPUT_MOUSE}="0"
+  '';
 
   # Define a user account. Don't forget to set a password with ‘passwd’.
   # users.users.alice = {

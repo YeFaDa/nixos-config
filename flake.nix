@@ -4,11 +4,11 @@
   inputs = {
     # 这里决定了你使用 unstable 还是 25.11
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    #NUR仓库
+    /*#NUR仓库
     nur = {
       url = "github:nix-community/NUR";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
+    };*/
     #noctalia v5
     noctalia = {
       url = "github:noctalia-dev/noctalia";
@@ -19,10 +19,11 @@
       url = "github:noctalia-dev/noctalia-greeter";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # CachyOS 内核（bore/lto/zen4 等变体），pinned overlay 命中 attic 二进制缓存
-    nix-cachyos-kernel.url = "github:xddxdd/nix-cachyos-kernel/release";
     #niri-glass
-    niri-glass.url = "github:YeFaDa/Niri-glass";
+    niri-glass = {
+      url = "github:YeFaDa/Niri-glass";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     /* home-manager = {
       url = "git+https://gitcode.com/GitHub_Trending/ho/home-manager.git";
       # The `follows` keyword in inputs is used for inheritance.
@@ -32,10 +33,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };*/
     # 引入插件仓库
-    vscode-extensions.url = "github:nix-community/nix-vscode-extensions";
+    vscode-extensions = {
+      url = "github:nix-community/nix-vscode-extensions";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     # OMP（Oh My Pi）harness，agents/omp.nix 使用
-    omp-nix.url = "github:yuxqiu/omp-nix";
-    
+    omp-nix = {
+      url = "github:yuxqiu/omp-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     #flclash
     flclash-nix = {
       url = "github:YeFaDa/flclash-nix";
@@ -52,18 +59,19 @@
     };
   };
 
-  outputs = { self, nixpkgs, vscode-extensions, nur, ... }@inputs: {
+  outputs = { self, nixpkgs, vscode-extensions, ... }@inputs: {
     # 把 "your-hostname" 改成你在 configuration.nix 里定义的 networking.hostName
     nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
     #  system = "x86_64-linux";
       specialArgs = { inherit inputs; };
       modules = [
-        {
+        /*{
           nixpkgs.overlays = [ nur.overlays.default ];
-        }
+        }*/
         ./configuration.nix # 引用你现有的配置
         ./noctalia.nix
         ./software-configuration.nix
+        #./honor-mta.nix # 荣耀分享/互传联盟(MTA)：bluetoothd -E + P2P 防火墙端口
         #./proxy/clash.nix
         ./vscode.nix
         ./games/game-prepare.nix
@@ -72,7 +80,7 @@
         ./agents/omp.nix
         ./proxy/flclash.nix
         ./pixi.nix
-        ./denial.nix
+        #./denial.nix
         ./astral.nix
     /*home-manager.nixosModules.home-manager
           {
