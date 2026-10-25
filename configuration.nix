@@ -13,6 +13,10 @@
 
   # Use the systemd-boot EFI boot loader.
   boot.loader.systemd-boot.enable = true;
+  # OpenCore 占着 ESP 的 EFI/BOOT/BOOTX64.EFI。bootctl 262 在跳过这个
+  # 外部引导器文件时返回 io.systemd.System/ESRCH，而新版安装器只容忍
+  # ESTALE，会把整个 bootloader 安装判为失败。graceful 让它忽略这类跳过。
+  boot.loader.systemd-boot.graceful = true;
   boot.loader.efi.canTouchEfiVariables = true;
 
 # networking.hostName = "nixos"; # Define your hostname.

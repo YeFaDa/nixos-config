@@ -21,6 +21,30 @@
     (final: prev: {
       wechat-bin = final.callPackage ./pkgs/wechat-bin { };
     })
+    # 本地包 zcode：NUR 的 zcode 3.16.2 随 nix profile 迁入后，其锁定的
+    # NUR rev 已找不到活的 deb 源（3.12.3 的 URL 404），且 NUR 新架构
+    # （repos.json 按需拉作者仓库）不适合直接 follows。这里按原 NUR 包
+    # 的依赖表逆向 vendor，用系统 nixpkgs 构建。
+    (final: prev: {
+      zcode = final.callPackage ./pkgs/zcode { };
+    })
+    # 本地包 alter-zero：上游只发预编译二进制，依赖面仅 glibc/libgcc，
+    # 用 autoPatchelfHook 接入系统 nixpkgs；定义见 pkgs/alter-zero。
+    (final: prev: {
+      alter-zero = final.callPackage ./pkgs/alter-zero { };
+    })
+    # Kimi Code 本地补丁：上游在 OpenCode Go 端点不会发 x-opencode-session，
+    # 而 config.toml 的 custom_headers 只能静态复用。补丁在请求时用当前
+    # 会话 ID 动态注入该头；仅对 opencode.ai 的 /zen/go/v1 端点生效。
+    # 两份补丁分别覆盖 openai-responses 与 chat/completions 协议。
+    (final: prev: {
+      kimi-code = inputs.kimi-code.packages.x86_64-linux.default.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [
+          ./pkgs/kimi-code/opencode-session.patch
+          ./pkgs/kimi-code/opencode-session-chat.patch
+        ];
+      });
+    })
     # niri-glass：不使用 niri-glass flake 自带的包（它锁死 niri@49fc611 + 自己的 nixpkgs），
     # 改为把它的 8 个补丁文件叠加到本机 nixpkgs 的 niri（v26.04）源码上，
     # 用本机 rustc 和依赖集构建。补丁只覆盖源码、不动 Cargo.lock，vendor hash 不变。
@@ -41,6 +65,9 @@
         '';
       });
     })
+    # NUR（qoder-cn / zcode）：overlay 让这些包用本 nixpkgs 实例评估构建，
+    # stdenv/glibc 与系统一致；input 定义（含 follows）见 flake.nix。
+    inputs.nur.overlays.default
   ];
   #boot.kernelPackages = pkgs.cachyosKernels.linuxPackages-cachyos-bore-lto-zen4;
   # 休眠（hibernate）恢复：swapfile 在根分区 @swap 子卷里，这里写"分区"而不是文件路径。
@@ -59,37 +86,38 @@
   # 前提是 boot.resumeDevice 指向该 swapfile 所在分区（见上方）。
   # 重建 swapfile 后这个偏移会变，需重新取。
   # 回退：删掉后四行再 nixos-rebuild switch 即可。
+  # TemporaryFilePath：VRAM 落盘位置，默认 /tmp，NVIDIA 建议换到 /var/tmp（Arch 同款）。
+  # 不要动 UseKernelSuspendNotifiers：615 的 open 模块默认就是 1（内核挂起通知器），
+  # 595+ 上游就是用这条路径取代 nvidia-suspend/resume 服务的。
+  # 2026-09-29 的 hibernate 能成，靠的就是它；2026-10-20 把它关成 0 之后，
+  # hibernate 阶段没有机制通知驱动，从 S4 回来 GPU 直接 FULLCHIP_RESET。
   boot.kernelParams = [
     ''"acpi_osi=Windows 2020"''
     "pcie_aspm=off"
     "nvme_core.default_ps_max_latency_us=0"
     "nvidia.NVreg_EnableS0ixPowerManagement=1"
+    "nvidia.NVreg_TemporaryFilePath=/var/tmp"
     "resume_offset=533760"
   ];
-  # 挂起转休眠（suspend-then-hibernate）：先 s2idle 快睡，HibernateDelaySec 到点自动落盘
-  # 休眠，合盖放一整天也不掉电。配套把合盖行为也改成 suspend-then-hibernate。
-  # 注：旧写法 systemd.sleep.extraConfig 在本版 nixpkgs 已改名为 settings.Sleep。
+  # 合盖：先 s2idle 快睡，HibernateDelaySec 到点自动转休眠。
+  # 2026-09-29 验证过这条路能完整走通（s2idle → 转 hibernate → 7.8 小时后恢复）。
   systemd.sleep.settings.Sleep.HibernateDelaySec = "30min";
   services.logind.settings.Login.HandleLidSwitch = "suspend-then-hibernate";
-  # 走 suspend-then-hibernate 时补的绑定。注意：只绑 suspend/resume，不要绑 hibernate。
-  # systemd-suspend-then-hibernate.service 是独立单元，不经过 systemd-suspend.service，
-  # 而 NixOS/NVIDIA 生成的 unit 只绑定了后者，所以必须显式补上，否则 NVIDIA 的
-  # 挂起准备不执行，s2idle 阶段直接唤不醒（2026-09-26 实测）。
-  # 反过来 nvidia-hibernate 不能绑：suspend-then-hibernate 的 VRAM 在 suspend 阶段
-  # 已存进系统内存，会随内存一起落盘，不需要再单独跑 hibernate；两个都跑会让
-  # /proc/driver/nvidia/suspend 被连写两次（2026-09-28 实测 hibernate 先于 suspend），
-  # 驱动状态错乱 → 进 s2idle 7 秒后 GSP RPC timeout（Xid 119），恢复后屏幕不亮。
-  systemd.services.nvidia-suspend = {
-    before = [ "systemd-suspend-then-hibernate.service" ];
-    wantedBy = [ "systemd-suspend-then-hibernate.service" ];
-  };
-  systemd.services.nvidia-resume = {
-    after = [ "systemd-suspend-then-hibernate.service" ];
-    wantedBy = [ "systemd-suspend-then-hibernate.service" ];
-  };
+  # 注意：改用内核挂起通知器（powerManagement.kernelSuspendNotifier = true）后，
+  # NixOS 不再生成 nvidia-suspend / nvidia-resume / nvidia-hibernate 这三个 unit，
+  # 所以这里不能（也不需要）再给它们补 before/wantedBy —— 给不存在的服务设属性
+  # 会造出没有 ExecStart 的空 unit。
   # zenergy：AMD Zen 功耗传感器内核模块（k10temp 不暴露 power1_average）。
   # 装好后 MangoHud 就能读到 CPU 功耗。
-  boot.extraModulePackages = [ config.boot.kernelPackages.zenergy ];
+  # 新 nixpkgs 在内核 dev 树里保留了 System.map，7.3 的 modules_install 因此
+  # 真的会跑 depmod，zenergy 自带的 modules.* 与内核模块树合并时冲突
+  # （buildEnv exit 25）。DEPMOD=true 跳过这一步；aggregateModules 合并后
+  # 本来就会统一重跑 depmod，索引不会缺。
+  boot.extraModulePackages = [
+    (config.boot.kernelPackages.zenergy.overrideAttrs (old: {
+      makeFlags = old.makeFlags ++ [ "DEPMOD=true" ];
+    }))
+  ];
   boot.kernelModules = [ "zenergy" "ntsync" ];
   # scx_lavd in Gaming mode（= --performance，与 CachyOS 的 gaming_mode 相同）
   services.scx = {
@@ -126,6 +154,9 @@
     };
   };
   #host设置#
+  security.pki.caCertificateBlacklist = [
+      "Comodo AAA Services root"
+    ];
   #本土化设置
   time.timeZone = "Asia/Shanghai";
   i18n.defaultLocale = "en_US.UTF-8";
@@ -189,16 +220,25 @@ hardware.graphics = {
 	modesetting.enable = true;
 	...（其余不变）*/
 hardware.nvidia = {
-  # NVIDIA 开源模块直接使用与当前 CachyOS 内核匹配的驱动包。
+  # 2026-10-21：615.78.08 的用户态二进制（nvidia-powerd / nvidia-smi /
+  # nvidia-cuda-mps-control）启动即在 dl_main 段错误，dynamicBoost 因此激活失败
+  # （switch-to-configuration exit 4）。
+  # 注意 nixpkgs 的分支算法（nvidia-x11/default.nix）：
+  #   latest        = max(production, new_feature) = max(595.104.02, 615.78.08) = 615.78.08
+  #   bleeding_edge = max(latest, beta)                                        = 615.78.08
+  # 两者是同一枚坏二进制，切来切去没用。只有 stable（= production = 595.104.02）
+  # 才躲得开。等 NVIDIA 修好 615 再换回来。
   branch = "bleeding_edge";
 	modesetting.enable = true;
 	open = true;
 	nvidiaSettings = true;
 	powerManagement.enable = true;
-	# 595+ 起在 open 模块下默认为 true，后果是 nvidia-suspend / nvidia-resume 两个 unit
-	# 整个不再生成（nvidia.nix 里的条件是 powerManagement.enable && !kernelSuspendNotifier）。
-	# 本机固件只有 s2idle，走内核 notifier 会进得去回不来，所以退回 systemd 服务路径。
-	powerManagement.kernelSuspendNotifier = false;
+	# 用内核挂起通知器：615 的 open 模块默认就是这条路径，也是 595+ 上游推荐的。
+	# 它会取代 nvidia-suspend/resume/hibernate 三个 systemd 服务
+	# （nvidia.nix 的生成条件是 powerManagement.enable && !kernelSuspendNotifier）。
+	# 2026-09-29 的 hibernate 能成正是走这条；10-20 误设成 false 退回服务路径后，
+	# hibernate 阶段没人通知驱动，S4 恢复后 GPU 直接 FULLCHIP_RESET。
+	powerManagement.kernelSuspendNotifier = true;
 	# 关键项 NVreg_EnableS0ixPowerManagement=1 见文件上方 boot.kernelParams：
 	# 本机固件只暴露 s2idle，NVIDIA 要求 s2idle 下必须开 S0ix 电源管理，否则唤不醒。
 	# 不能写成 powerManagement.finegrained：该选项带断言
@@ -292,6 +332,63 @@ environment.systemPackages = with pkgs; [
   file-roller
   #usbutils
   xwayland
+
+  # —— 2026-10-21 自 nix profile 迁入 ——
+  # 背景：profile 时代每个来源各钉各的 nixpkgs（光 registry 的 flake:nixpkgs
+  # 就有八九枚不同的锁），机器上同时活着 glibc 2.42/2.44 多个世代。Electron
+  # 应用进程里加载着旧 libm，dlopen 系统 mesa 26.2.5 的 dri_gbm.so 时
+  # GLIBC_2.43 not found → MESA-LOADER 报错、硬件加速全丢。
+  # 现在全部收进系统 flake：nixpkgs 包直接用系统实例，外部包走 follows。
+  # 外部 flake 包（input 均已 inputs.nixpkgs.follows，见 flake.nix）
+  inputs.workbuddy-nix.packages.x86_64-linux.workbuddy
+  #inputs.codex-desktop-linux.packages.x86_64-linux.default
+  inputs.llm-agents.packages.x86_64-linux.opencode2
+  inputs.omp-nix.packages.x86_64-linux.default
+  # Kimi Code CLI 已加本地补丁（见上方 overlay 与 pkgs/kimi-code）
+  kimi-code
+  # NUR 包（经上方 nixpkgs.overlays 的 inputs.nur.overlays.default 进入 pkgs.nur）
+  nur.repos.Sittymin.qoder-cn
+  # zcode 已 vendor 到 pkgs/zcode（见上方 overlay）
+  zcode
+  # alter-zero 已 vendor 到 pkgs/alter-zero（见上方 overlay）
+  #alter-zero
+  # 以下原为 registry nixpkgs 包（各自锁过不同的 nixpkgs），统一到系统实例
+  android-tools
+  antiword
+  bbe
+  binutils
+  capitaine-cursors
+  pkgsCross.aarch64-multiplatform.stdenv.cc
+  pkgsCross.aarch64-multiplatform.musl.stdenv.cc
+  discord
+  ffmpeg
+  fluffychat
+  gpu-screen-recorder
+  #hmcl
+  iw
+  libxml2
+  # mpv-with-scripts 属性已被上游移除，现用 mpv（同 0.41.0；脚本需要时
+  # 可用 pkgs.mpvScripts.* 自行拼）
+  mpv
+  openjdk21
+  paper-icon-theme
+  papirus-icon-theme
+  patchelf
+  pnpm
+  poppler-utils
+  python3
+  qogir-icon-theme
+  radare2
+  telegram-desktop
+  #temurin-bin-17
+  #temurin-bin-21
+  #temurin-bin-25
+  unzip
+  uv
+  winetricks
+  zig
+  # 注：profile 里的 temurin-bin-21-1 与 temurin-bin-21 是同一个 store 路径
+  # （不同锁装了两遍），已去重。
 ];
 #字体设置，不用改了
 fonts = {
@@ -351,10 +448,12 @@ services.openssh = {
   };
 };
 
+nix.settings.trusted-users = [ "root" "yz" ];
+
 nix.settings.experimental-features = [ "nix-command" "flakes" ];
 nix.settings.substituters = [ "https://mirrors.ustc.edu.cn/nix-channels/store" "https://mirrors.tuna.tsinghua.edu.cn/nix-channels/store" "https://cache.nixos.org" ];
 # CachyOS 内核二进制缓存（xddxdd/nix-cachyos-kernel/release 构建在此缓存）
 # noctalia 官方 cachix 缓存（noctalia-greeter 等直接下二进制，不用源码编译）
-nix.settings.extra-substituters = [ "https://noctalia.cachix.org" "https://attic.xuyh0120.win/lantian?priority=1000" ];
-nix.settings.extra-trusted-public-keys = [ "noctalia.cachix.org-1:pCOR47nnMEo5thcxNDtzWpOxNFQsBRglJzxWPp3dkU4=" "lantian:EeAUQ+W+6r7EtwnmYjeVwx5kOGEBpjlBfPlzGlTNvHc=" ];
+nix.settings.extra-substituters = [ "https://noctalia.cachix.org" ];
+nix.settings.extra-trusted-public-keys = [ "noctalia.cachix.org-1:pCOR47nnMEo5thcxNDtzWpOxNFQsBRglJzxWPp3dkU4=" ];
 }
