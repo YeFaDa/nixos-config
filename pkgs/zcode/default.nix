@@ -39,16 +39,24 @@
   pango,
   util-linux,
   xdg-utils,
+
+  # 3.17.x 起 Electron 44 不再自带 ANGLE 的 libEGL/libGLESv2，
+  # 运行时通过 dlopen 找系统的 libEGL.so.1 / libGLESv2.so.2 / libGL.so.1。
+  # NixOS 这些只在 libglvnd 的 store 路径里，必须显式加进 RUNPATH；
+  # vulkan-loader 让 ANGLE 能发现 /run/opengl-driver 的 NVIDIA ICD；
+  # pciutils 是 ANGLE 枚举 GPU 时 dlopen libpci 用的。
+  libGL,
+  vulkan-loader,
+  pciutils,
 }:
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "zcode";
-  version = "3.16.3";
+  version = "3.18.2";
 
   src = fetchurl {
     url = "https://cdn-zcode.z.ai/zcode/electron/releases/${finalAttrs.version}/linux-x64/ZCode-${finalAttrs.version}-linux-x64.deb";
-    # 实测哈希（与原 NUR 包一致）
-    hash = "sha256-EoEysZWXf9CoyKbClc9C/hWSItelxe/v2LXwDviKuLY=";
+    hash = "sha256-p+Bm7rAY0V5ANUahTdNpIiD8mXZ2mx81JaBiDPqXT3M=";
   };
 
   nativeBuildInputs = [
@@ -93,6 +101,14 @@ stdenv.mkDerivation (finalAttrs: {
   # Electron 的 koffi 等原生模块带其他平台的库，autoPatchelf 扫到会失败
   autoPatchelfIgnoreMissingDeps = true;
 
+  # 这些库只被 dlopen，不会出现在 DT_NEEDED 里，autoPatchelf 不会自动
+  # 加进 RUNPATH，所以显式声明为运行时依赖。
+  runtimeDependencies = [
+    libGL
+    vulkan-loader
+    pciutils
+  ];
+
   unpackPhase = ''
     runHook preUnpack
     dpkg-deb -x $src .
@@ -106,6 +122,11 @@ stdenv.mkDerivation (finalAttrs: {
 
     cp -r opt $out/opt
     cp -r usr/share/icons $out/share/icons
+
+    # deb 自带的 vulkan-loader 未经 NixOS 补丁，找不到 /run/opengl-driver
+    # 下的 NVIDIA ICD；换成 nixpkgs 的 loader，SwiftShader ICD 仍保留。
+    rm $out/opt/ZCode/libvulkan.so.1
+    ln -s ${lib.getLib vulkan-loader}/lib/libvulkan.so.1 $out/opt/ZCode/libvulkan.so.1
 
     substituteInPlace usr/share/applications/zcode.desktop \
       --replace-fail "/opt/ZCode/zcode" "$out/bin/zcode"

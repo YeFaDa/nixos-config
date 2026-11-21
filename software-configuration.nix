@@ -33,22 +33,25 @@
     (final: prev: {
       alter-zero = final.callPackage ./pkgs/alter-zero { };
     })
-    # Kimi Code 本地补丁：上游在 OpenCode Go 端点不会发 x-opencode-session，
-    # 而 config.toml 的 custom_headers 只能静态复用。补丁在请求时用当前
-    # 会话 ID 动态注入该头；仅对 opencode.ai 的 /zen/go/v1 端点生效。
-    # 两份补丁分别覆盖 openai-responses 与 chat/completions 协议。
+    # 本地包 workbuddy：腾讯 CodeBuddy 桌面版，官方 deb 重打包（原 ~/workbuddy-nix）。
+    # 自带 Electron + 官方 app.asar；默认删 resources/runtime（约 595 MB），
+    # Nix store 内 chrome-sandbox 无法 setuid，默认加 --no-sandbox。
     (final: prev: {
-      kimi-code = inputs.kimi-code.packages.x86_64-linux.default.overrideAttrs (old: {
-        patches = (old.patches or [ ]) ++ [
-          ./pkgs/kimi-code/opencode-session.patch
-          ./pkgs/kimi-code/opencode-session-chat.patch
-        ];
-      });
+      workbuddy = final.callPackage ./pkgs/workbuddy { };
     })
+    # Kimi Code 本地补丁：上游在 OpenCode Go 端点不会发 x-opencode-session。
+    # 请求入口在 packages/core/src/llm/generate.ts；补丁在该文件解析 endpoint
+    # 时用会话 cacheKey 动态注入该头，一份补丁即可同时覆盖 openai-responses 与
+    # chat/completions；仅对 opencode.ai 的 /zen/go/v1 端点生效。
+    /*(final: prev: {
+      kimi-code = inputs.kimi-code.packages.x86_64-linux.default.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [ ./pkgs/kimi-code/opencode-session.patch ];
+      });
+    })*/
     # niri-glass：不使用 niri-glass flake 自带的包（它锁死 niri@49fc611 + 自己的 nixpkgs），
     # 改为把它的 8 个补丁文件叠加到本机 nixpkgs 的 niri（v26.04）源码上，
     # 用本机 rustc 和依赖集构建。补丁只覆盖源码、不动 Cargo.lock，vendor hash 不变。
-    (final: prev: {
+    /*(final: prev: {
       niri-glass = prev.niri.overrideAttrs (old: {
         pname = "niri-glass";
         postPatch = (old.postPatch or "") + ''
@@ -64,7 +67,7 @@
           cp --no-preserve=mode ${inputs.niri-glass}/niri-config/src/appearance.rs niri-config/src/appearance.rs
         '';
       });
-    })
+    })*/
     # NUR（qoder-cn / zcode）：overlay 让这些包用本 nixpkgs 实例评估构建，
     # stdenv/glibc 与系统一致；input 定义（含 follows）见 flake.nix。
     inputs.nur.overlays.default
@@ -107,6 +110,21 @@
   # NixOS 不再生成 nvidia-suspend / nvidia-resume / nvidia-hibernate 这三个 unit，
   # 所以这里不能（也不需要）再给它们补 before/wantedBy —— 给不存在的服务设属性
   # 会造出没有 ExecStart 的空 unit。
+  # 2026-10-29：s2idle 实测恢复失败（现有日志 10-25 起唯一一次睡眠，无成功基线）。
+  # 16:11:27 `systemctl suspend`（logind 记到 PID 2536 'systemctl'）→ 16:11:28 进入 s2idle；
+  # 17:27:09 唤醒时 NVIDIA 615.78.08 open 模块 GC6 退出失败：
+  #   GSP-FMC Error error code=0x83d
+  #   gpuPowerManagementResume: GSP boot failed at resume (bootMode 0x2): 0x55
+  #   _gpuGc6ExitStateLoad: GPU is unable to transition from GC6 to D0 state
+  # nv_set_system_power_state 触发 WARNING 后 GSP 超时、寄存器读坏；17:27:57 日志
+  # 无 shutdown 序列直接中断，user journal 损坏，17:28:57 冷启动（reset reason
+  # 0x00200800 = ACPI power state transition）→ 判定为强制断电。
+  # 结论：S0ix=1 的 GC6 退出路径在 615.78.08 上不可用；不是 resume_offset 问题
+  # （每次启动都会报 "PM: Image not found"，属正常探测）。
+  # 待验证：① 切回 stable 595.104.02 重测 s2idle（615 是 10 月下旬才换上的变量）；
+  # ② 若留在 615，唯一可试的是关 S0ix PM，但旧记录称关了唤不醒，属实验；
+  # ③ 修好前合盖 suspend-then-hibernate 也别用：30 分钟后转休眠要经同一条 GC6 退出路径。
+  # offset 复核（应为 533760）：sudo btrfs inspect-internal map-swapfile -r /swap/swapfile
   # zenergy：AMD Zen 功耗传感器内核模块（k10temp 不暴露 power1_average）。
   # 装好后 MangoHud 就能读到 CPU 功耗。
   # 新 nixpkgs 在内核 dev 树里保留了 System.map，7.3 的 modules_install 因此
@@ -120,14 +138,19 @@
   ];
   boot.kernelModules = [ "zenergy" "ntsync" ];
   # scx_lavd in Gaming mode（= --performance，与 CachyOS 的 gaming_mode 相同）
-  services.scx = {
+  # nixpkgs 已移除 services.scx，改为 scx_loader；default_mode 固定为 Gaming，
+  # 保持开机即按 gaming 参数运行（原 extraArgs 迁到 scheds.scx_lavd.gaming_mode）。
+  services.scx-loader = {
     enable = true;
-    scheduler = "scx_lavd";
-    extraArgs = [
-      "--performance"
-      "--pinned-slice-us"
-      "500"
-    ];
+    config = {
+      default_sched = "scx_lavd";
+      default_mode = "Gaming";
+      scheds.scx_lavd.gaming_mode = [
+        "--performance"
+        "--pinned-slice-us"
+        "500"
+      ];
+    };
   };
 #Wi-Fi 后端：改用 wpa_supplicant（荣耀分享走互传联盟 MTA 时需要 Wi-Fi Direct(P2P)；
 #iwd 的 P2P 支持不完整，NM 里只会暴露一个虚拟 p2p 占位设备，nmcli 也没有
@@ -223,6 +246,8 @@ hardware.nvidia = {
   # 2026-10-21：615.78.08 的用户态二进制（nvidia-powerd / nvidia-smi /
   # nvidia-cuda-mps-control）启动即在 dl_main 段错误，dynamicBoost 因此激活失败
   # （switch-to-configuration exit 4）。
+  # 2026-10-29 复核：当前代际 615.78.08 下 nvidia-smi 正常、nvidia-powerd active，
+  # 10-21 的段错误未再复现（power.limit 仍报 N/A，Dynamic Boost 实际档位未验证）。
   # 注意 nixpkgs 的分支算法（nvidia-x11/default.nix）：
   #   latest        = max(production, new_feature) = max(595.104.02, 615.78.08) = 615.78.08
   #   bleeding_edge = max(latest, beta)                                        = 615.78.08
@@ -279,7 +304,7 @@ programs.google-chrome.enable = true;
 
 #niri-glass（补丁叠在 nixpkgs 的 niri 上，overlay 定义见本文件顶部）
 programs.niri.enable = true;
-programs.niri.package = pkgs.niri-glass;
+#programs.niri.package = pkgs.niri-glass;
 
 
 programs.fish.enable = true;
@@ -323,6 +348,7 @@ environment.systemPackages = with pkgs; [
   nodejs_24
   ww-manager
   starship
+  nomacs
   #tuigreet
   bluez
   kdePackages.qt6ct
@@ -332,6 +358,9 @@ environment.systemPackages = with pkgs; [
   file-roller
   #usbutils
   xwayland
+  wpsoffice-cn
+
+  inputs.antigravity-nix.packages.x86_64-linux.default
 
   # —— 2026-10-21 自 nix profile 迁入 ——
   # 背景：profile 时代每个来源各钉各的 nixpkgs（光 registry 的 flake:nixpkgs
@@ -340,18 +369,20 @@ environment.systemPackages = with pkgs; [
   # GLIBC_2.43 not found → MESA-LOADER 报错、硬件加速全丢。
   # 现在全部收进系统 flake：nixpkgs 包直接用系统实例，外部包走 follows。
   # 外部 flake 包（input 均已 inputs.nixpkgs.follows，见 flake.nix）
-  inputs.workbuddy-nix.packages.x86_64-linux.workbuddy
-  #inputs.codex-desktop-linux.packages.x86_64-linux.default
+  inputs.codex-desktop-linux.packages.x86_64-linux.default
   inputs.llm-agents.packages.x86_64-linux.opencode2
+  inputs.llm-agents.packages.x86_64-linux.prime-agent
   inputs.omp-nix.packages.x86_64-linux.default
   # Kimi Code CLI 已加本地补丁（见上方 overlay 与 pkgs/kimi-code）
-  kimi-code
+  # kimi-code
   # NUR 包（经上方 nixpkgs.overlays 的 inputs.nur.overlays.default 进入 pkgs.nur）
   nur.repos.Sittymin.qoder-cn
   # zcode 已 vendor 到 pkgs/zcode（见上方 overlay）
   zcode
   # alter-zero 已 vendor 到 pkgs/alter-zero（见上方 overlay）
   #alter-zero
+  # workbuddy 已 vendor 到 pkgs/workbuddy（见上方 overlay）
+  workbuddy
   # 以下原为 registry nixpkgs 包（各自锁过不同的 nixpkgs），统一到系统实例
   android-tools
   antiword

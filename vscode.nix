@@ -18,7 +18,7 @@ in
         github.vscode-pull-request-github
 
         # GitHub 生态（GitKraken 出品，GitHub 集成最强的工具）
-        eamodio.gitlens
+        # eamodio.gitlens
 
         # Noctalia 主题
         noctalia.noctaliatheme

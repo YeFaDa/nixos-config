@@ -14,13 +14,7 @@
       url = "github:nix-community/NUR";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # workbuddy（CodeBuddy 桌面版，官方 deb 重打包，源在 ~/workbuddy-nix）。
-    # path: 引入 = 取工作树状态（package.nix 有未提交改动，即当前想要的状态）；
-    # follows 保证用系统 nixpkgs 构建，不再自带一枚旧 glibc。
-    workbuddy-nix = {
-      url = "path:/home/yz/workbuddy-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    # workbuddy 已收进 pkgs/workbuddy，不再作为独立 flake input。
     # codex-desktop-linux
     codex-desktop-linux = {
       url = "github:ilysenko/codex-desktop-linux";
@@ -41,11 +35,11 @@
       url = "github:noctalia-dev/noctalia-greeter";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    #niri-glass
+    /*#niri-glass
     niri-glass = {
       url = "github:YeFaDa/Niri-glass";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
+    };*/
     /* home-manager = {
       url = "git+https://gitcode.com/GitHub_Trending/ho/home-manager.git";
       # The `follows` keyword in inputs is used for inheritance.
@@ -66,10 +60,12 @@
     };
     # Kimi Code CLI（MoonshotAI）。上游 flake 自带 pnpm 依赖与 SEA 打包，
     # follows 后由系统 nixpkgs（nodejs_24 24.21.0 ≥ 上游要求 24.15.0）构建。
-    kimi-code = {
-      url = "github:MoonshotAI/kimi-code";
+    # 钉在 2.7.0 发布 tag（a5e355e，2026-11-19），含 #4949/#4953 修复；
+    # 之后若要跟 main 开发线，改回 github:MoonshotAI/kimi-code。
+    /*kimi-code = {
+      url = "github:MoonshotAI/kimi-code/a5e355e2718a2ebf70d8229fa5a05fe35d5f98a1";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
+    };*/
     #flclash
     flclash-nix = {
       url = "github:YeFaDa/flclash-nix";
@@ -84,6 +80,10 @@
       url = "git+file:///home/yz/astral-game.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };*/
+    antigravity-nix = {
+          url = "github:jacopone/antigravity-nix";
+          inputs.nixpkgs.follows = "nixpkgs";
+        };
   };
 
   outputs = { self, nixpkgs, vscode-extensions, ... }@inputs: {
@@ -98,8 +98,8 @@
         #./honor-mta.nix # 荣耀分享/互传联盟(MTA)：bluetoothd -E + P2P 防火墙端口
         #./proxy/clash.nix
         ./vscode.nix
-        ./games/game-prepare.nix
-        ./kvm+qemu+virt/default.nix
+        #./games/game-prepare.nix
+        #./kvm+qemu+virt/default.nix
         #./agents/deepseek-harness.nix
         #./agents/omp.nix
         ./proxy/flclash.nix

@@ -1,8 +1,14 @@
---- a/packages/agent-core-v2/src/human/llm/requester/bases/openai-responses/requester.ts
-+++ b/packages/agent-core-v2/src/human/llm/requester/bases/openai-responses/requester.ts
-@@ -52,6 +52,37 @@
-   maxLength: 64,
- };
+--- a/packages/core/src/llm/generate.ts
++++ b/packages/core/src/llm/generate.ts
+@@ -1,4 +1,4 @@
+-import { resolveEndpoint } from '#/llm/endpoint';
++import { resolveEndpoint, type ResolvedEndpoint } from '#/llm/endpoint';
+ import { isAbortError, toLlmErrorMessage, toLlmSyntaxErrorMessage } from '#/llm/protocol/errors';
+ import type { DecodeSink, LlmModule, ProtocolReply } from '#/llm/protocol/protocol';
+ import { withProtocolCapabilities } from '#/llm/protocol/rules/model';
+@@ -18,6 +18,36 @@
+   readonly onEvent?: (event: LlmAttemptEvent) => void;
+ }
  
 +const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session';
 +
@@ -19,30 +25,33 @@
 +}
 +
 +function withOpenCodeGoSessionHeader(
-+  request: OpenAIResponsesRequestParams,
-+  baseUrl: string | undefined,
++  endpoint: ResolvedEndpoint,
 +  cacheKey: string | undefined,
-+): OpenAIResponsesRequestParams {
-+  if (cacheKey === undefined || !isOpenCodeGoBaseUrl(baseUrl)) {
-+    return request;
++): ResolvedEndpoint {
++  if (cacheKey === undefined || !isOpenCodeGoBaseUrl(endpoint.baseUrl)) {
++    return endpoint;
 +  }
 +  return {
-+    ...request,
++    ...endpoint,
 +    headers: {
-+      ...request.headers,
++      ...endpoint.headers,
 +      [OPENCODE_GO_SESSION_HEADER]: cacheKey.replace(/^session_/, ''),
 +    },
 +  };
 +}
 +
- function createClient(model: LlmModel, headers: Record<string, string> | undefined): OpenAI {
-   const headersTimeoutMs = resolveLlmHeadersTimeoutMs();
-   const dispatcher =
-@@ -217,6 +248,7 @@
-         onEvent?.({ type: 'llm.failed.syntax', error: toLlmSyntaxErrorMessage(error) });
-         return;
-       }
-+      request = withOpenCodeGoSessionHeader(request, model.baseUrl, config.cacheKey);
-       try {
-         await executeOpenAIResponsesRequest(request, {
-           connection,
+ function moduleOf(request: LlmRequest): LlmModule {
+   return {
+     model: {
+@@ -201,7 +231,10 @@
+   }
+   let streamStarted = false;
+   try {
+-    const endpoint = await resolveEndpoint(request.endpoint);
++    const endpoint = withOpenCodeGoSessionHeader(
++      await resolveEndpoint(request.endpoint),
++      request.model.cacheKey,
++    );
+     const clientFactory = request.endpoint?.clientFactory;
+     const client =
+       clientFactory === undefined
